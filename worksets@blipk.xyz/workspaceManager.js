@@ -80,7 +80,7 @@ export class WorkspaceManager {
 
                 // Minimum workspaces should be one more than the workspace index that the last active workset is on
                 if ( !destroyClean ) {
-                    let index = parseInt( workspaceMapKey.substr( -1, 1 ) )
+                    let index = parseInt( workspaceMapKey.replace( "Workspace", "" ), 10 )
                     if ( workspaceMapValues.currentWorkset != "" && index > min_workspaces - 2 ) {
                         min_workspaces = index + 2
                     }

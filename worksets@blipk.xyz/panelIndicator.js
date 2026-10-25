@@ -541,7 +541,7 @@ export var WorksetsIndicator = GObject.registerClass( {
             let infoText = "Has these favourites"
             Me.session.workspaceMaps.forEachEntry( ( workspaceMapKey, workspaceMapValues, i ) => {
                 if ( workspaceMapValues.defaultWorkset == menuItem.workset.WorksetName )
-                    infoText += " on the " + utils.stringifyNumber( parseInt( workspaceMapKey.substr( -1, 1 ) ) + 1 ) + " workspace"
+                    infoText += " on the " + utils.stringifyNumber( parseInt( workspaceMapKey.replace( "Workspace", "" ), 10 ) + 1 ) + " workspace"
             }, this )
             menuItem.infoMenuButton = new popupMenu.PopupImageMenuItem( _( infoText ), "" )
             menuItem.infoMenuButton.label.set_x_expand( true )

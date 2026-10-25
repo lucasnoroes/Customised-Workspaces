@@ -553,7 +553,7 @@ export class SessionManager {
         let isActive = -1
         this.workspaceMaps.forEachEntry( function ( workspaceMapKey, workspaceMapValues ) {
             if ( workspaceMapValues.currentWorkset == name ) {
-                isActive = parseInt( workspaceMapKey.substr( -1, 1 ) )
+                isActive = parseInt( workspaceMapKey.replace( "Workspace", "" ), 10 )
                 return
             }
         }, this )
@@ -639,7 +639,7 @@ export class SessionManager {
             this.workspaceMaps[closing].currentWorkset = ""
 
             // Show the default
-            if ( parseInt( closing.substr( -1, 1 ) ) == Me.workspaceManager.activeWorkspaceIndex )
+            if ( parseInt( closing.replace( "Workspace", "" ), 10 ) == Me.workspaceManager.activeWorkspaceIndex )
                 this.displayWorkset( this.DefaultWorkset, false, true )
 
             if ( this.activeSession.Options.ShowNotifications )
