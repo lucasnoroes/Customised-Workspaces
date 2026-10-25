@@ -46,7 +46,7 @@
       <description>Reverse the menu order if you have your panel on the lower edge</description>
     </key>
     <key name="debug-mode" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Enable logging</summary>
       <description>Toggles writing log file to ~/.config/worksets@blipk.xyz/debug.log</description>
     </key>
@@ -54,6 +54,17 @@
       <default>""</default>
       <summary>Workspace Switch CLI</summary>
       <description>Run a CLI command when the workspace is switched. You can use the $CWORKSPACE variable for the customised workspace name</description>
+    </key>
+    <key name="grayscale-icon" type="b">
+      <default>false</default>
+      <summary>Grayscale Icon</summary>
+      <description>Change the panel/dash icon to be grayscale</description>
+    </key>
+    <key name="all-environments-app-position" type="i">
+      <range min="-100" max="100"/>
+      <default>-1</default>
+      <summary>Last position for apps added to all environments</summary>
+      <description>The last position that "Add app to all environments" used. The position dialog of that action shows it first. 1 is the first position and 2 is the second position. -1 is the last position and -2 is the second last position.</description>
     </key>
     <key name="favorites-prototype" type="s">
       <default>"[{\"name\": \"org.gnome.Terminal.desktop\", \"displayName\": \"Terminal\", \"icon\": \"org.gnome.Terminal\", \"exec\": \"gnome-terminal\" }]"</default>
@@ -74,6 +85,11 @@
       <default>"{ \"SessionName\":\"\",\"Default\": \"\",\"Options\":{\"ShowNotifications\":false, \"ShowHelpers\":true, \"IsolateWorkspaces\":true, \"ShowPanelIndicator\":true, \"ShowWorkspaceOverlay\":true},\"Worksets\":[{\"WorksetName\":\"\", \"WindowData\":null, \"FavApps\":[\"\"]}] }"</default>
       <summary>JSObject containing all data for the sesion</summary>
       <description>Contains the information on the extensions session.</description>
+    </key>
+    <key name="appchooser-sha256" type="s">
+      <default>"eef053ca900cee03ba705fa16755f684b4b1e413c4a50e026ea2cb05c917a983"</default>
+      <summary>appChooser.js SHA256 hash</summary>
+      <description>SHA256 hash of lib/ui/appChooser.js for integrity verification. Updated automatically by _update-appchooser-hash.sh during packaging.</description>
     </key>
   </schema>
 </schemalist>

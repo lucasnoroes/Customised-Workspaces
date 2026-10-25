@@ -1,7 +1,7 @@
 /*
  * Customised Workspaces extension for Gnome 3
  * This file is part of the Customised Workspaces Gnome Extension for Gnome 3
- * Copyright (C) 2023 A.D. http://github.com/blipk
+ * Copyright (C) http://github.com/blipk
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -99,41 +99,33 @@ export function isEmpty ( v ) {
                         : Boolean( v )
 }
 
-if ( !Object.prototype.hasOwnProperty( "forEachEntry" ) ) {
-    Object.defineProperty( Object.prototype, "forEachEntry", {
-        value: function ( callback, thisArg, recursive = false, recursiveIndex = 0 ) {
-            if ( this === null ) throw new TypeError( "Not an object" )
-            thisArg = thisArg || this
+export function forEachEntry( obj, callback, thisArg, recursive = false, recursiveIndex = 0 ) {
+    if ( obj === null ) throw new TypeError( "Not an object" )
+    thisArg = thisArg || obj
 
-            Object.entries( this ).forEach( function ( entryArray, entryIndex ) {
-                let [ key, value ] = entryArray
-                let entryObj = { [key]: this[key] }
-                let retIndex = entryIndex + recursiveIndex
-                callback.call( thisArg, key, this[key], retIndex, entryObj, entryArray, this )
-                if ( typeof this[key] === "object" && this[key] !== null && recursive === true ) {
-                    if ( Array.isArray( this[key] ) === true ) {
-                        this[key].forEach( function ( prop, index ) {
-                            if ( Array.isArray( this[key][index] ) === false && typeof this[key][index] === "object" && this[key][index] !== null ) {
-                                recursiveIndex += Object.keys( this ).length - 1
-                                this[key][index].forEachEntry( callback, thisArg, recursive, recursiveIndex )
-                            }
-                        }, this )
-                    } else {
-                        recursiveIndex += Object.keys( this ).length - 1
-                        this[key].forEachEntry( callback, thisArg, recursive, recursiveIndex )
+    Object.entries( obj ).forEach( function ( entryArray, entryIndex ) {
+        let [ key, value ] = entryArray
+        let entryObj = { [key]: obj[key] }
+        let retIndex = entryIndex + recursiveIndex
+        callback.call( thisArg, key, obj[key], retIndex, entryObj, entryArray, obj )
+        if ( typeof obj[key] === "object" && obj[key] !== null && recursive === true ) {
+            if ( Array.isArray( obj[key] ) === true ) {
+                obj[key].forEach( function ( prop, index ) {
+                    if ( Array.isArray( obj[key][index] ) === false && typeof obj[key][index] === "object" && obj[key][index] !== null ) {
+                        recursiveIndex += Object.keys( obj ).length - 1
+                        forEachEntry( obj[key][index], callback, thisArg, recursive, recursiveIndex )
                     }
-                }
-            }, this )
+                } )
+            } else {
+                recursiveIndex += Object.keys( obj ).length - 1
+                forEachEntry( obj[key], callback, thisArg, recursive, recursiveIndex )
+            }
         }
     } )
 }
 
-if ( !Object.prototype.hasOwnProperty( "filterObj" ) ) {
-    Object.defineProperty( Object.prototype, "filterObj", {
-        value: function ( predicate ) {
-            return Object.fromEntries( Object.entries( this ).filter( predicate ) )
-        }
-    } )
+export function filterObj( obj, predicate ) {
+    return Object.fromEntries( Object.entries( obj ).filter( predicate ) )
 }
 
 export function splitURI( inURI ) {
@@ -181,22 +173,42 @@ export function spawnWithCallback( workingDirectory, argv, envp, flags, childSet
         return
 
     GLib.close( stdinFile )
-    GLib.close( stderrFile )
 
     let standardOutput = ""
+    let standardError = ""
 
     let stdoutStream = new Gio.DataInputStream( {
-        base_stream: new Gio.UnixInputStream( {
-            fd: stdoutFile
-        } )
+        base_stream: new Gio.UnixInputStream( { fd: stdoutFile } )
     } )
+    let stderrStream = new Gio.DataInputStream( {
+        base_stream: new Gio.UnixInputStream( { fd: stderrFile } )
+    } )
+
+    let stdoutDone = false
+    let stderrDone = false
+    const checkDone = () => {
+        if ( stdoutDone && stderrDone ) {
+            if ( standardError ) dev.log( "spawnWithCallback stderr:", standardError )
+            callback( standardOutput )
+        }
+    }
 
     readStream( stdoutStream, function ( output ) {
         if ( output === null ) {
             stdoutStream.close( null )
-            callback( standardOutput )
+            stdoutDone = true
+            checkDone()
         } else {
             standardOutput += output
+        }
+    } )
+    readStream( stderrStream, function ( output ) {
+        if ( output === null ) {
+            stderrStream.close( null )
+            stderrDone = true
+            checkDone()
+        } else {
+            standardError += output
         }
     } )
 }
@@ -264,22 +276,55 @@ export class InjectionHandler {
     }
 }
 
+// Remove the IDs of completed GLib sources when this many sources are recorded
+const SOURCE_PRUNE_SIZE = 100
+
+/**
+ * Keeps signal connections and GLib sources (for example from GLib.timeout_add()), so that
+ * disconnectAll() can remove all of them when the extension is disabled.
+ */
 export class SignalHandler {
     constructor() {
-        this.signalIds = []
+        // Signal handler IDs and GLib source IDs are separate number ranges with the same values,
+        // thus they are kept apart: [target, handler ID] pairs, and a set of source IDs.
+        this._connections = []
+        this._sources = new Set()
     }
 
+    /**
+     * Connects a signal handler, or records a GLib source.
+     * @param {object|number} target - The object to connect to, or a GLib source ID
+     * @param {string|null} [signal=null] - The signal name
+     * @param {function|null} [fn=null] - The signal handler
+     * @returns {number|undefined} The handler ID or the source ID
+     */
     add( target, signal = null, fn = null ) {
-        try {
-            let signalId = target.connect ? target.connect( signal, fn ) : target
-            this.signalIds[signalId] = target
-        } catch ( e ) { dev.log( e ) }
+        if ( typeof target === "number" ) {
+            if ( this._sources.size >= SOURCE_PRUNE_SIZE ) this._pruneCompletedSources()
+            this._sources.add( target )
+            return target
+        }
+        const handlerId = target.connect( signal, fn )
+        this._connections.push( [target, handlerId] )
+        return handlerId
     }
 
     disconnectAll() {
-        try {
-            this.signalIds.forEach( ( target, id ) => target.disconnect ? target.disconnect( id ) : GLib.Source.remove( id ) )
-        } catch ( e ) { dev.log( e ) }
+        for ( const [target, handlerId] of this._connections ) {
+            target.disconnect( handlerId )
+        }
+        this._connections = []
+
+        this._pruneCompletedSources()
+        this._sources.forEach( sourceId => GLib.Source.remove( sourceId ) )
+        this._sources.clear()
+    }
+
+    /** Forgets the sources that are not in the main context any more, for example time-outs that completed. */
+    _pruneCompletedSources() {
+        const mainContext = GLib.MainContext.default()
+        for ( const sourceId of [...this._sources] )
+            if ( !mainContext.find_source_by_id( sourceId ) ) this._sources.delete( sourceId )
     }
 
     destroy() {

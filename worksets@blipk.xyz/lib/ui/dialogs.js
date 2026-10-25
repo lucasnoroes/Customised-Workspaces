@@ -15,6 +15,7 @@ import * as shellEntry from "resource:///org/gnome/shell/ui/shellEntry.js"
 import * as dev from "../../dev.js"
 import * as utils from "../../utils.js"
 import * as fileUtils from "../../fileUtils.js"
+import * as uiUtils from "./uiUtils.js"
 
 
 //Modal dialog popup based off runDialog that can display a message and/or get user input from a text box or from sets of JSObjects
@@ -39,6 +40,7 @@ export var ObjectInterfaceDialog = GObject.registerClass( {
         this._objectsSetBoxes = []
         this.DIALOG_GROW_TIME = 0.1
         this._callback = null
+        this._confirmed = false
 
         if ( typeof callback !== "function" ) throw TypeError( "ObjectInterfaceDialog._init error: callback must be a function" )
         this._callback = callback
@@ -84,6 +86,7 @@ export var ObjectInterfaceDialog = GObject.registerClass( {
             buttons = ( typeof buttons == "string" ) ? defaults : buttons
             buttons.forEach( function ( button, i ) {
                 if ( button.action ) button.action = button.action.bind( this )
+                else if ( button.default ) button.action = () => { this._confirmed = true; this.close() }
                 else button.action = () => { this.close() }
 
                 this.buttons[i] = this.addButton( button )
@@ -119,7 +122,7 @@ export var ObjectInterfaceDialog = GObject.registerClass( {
                         jsobjectsSets.push( tmpObjectsSet )
                     }
 
-                    let btn = createIconButton(
+                    let btn = uiUtils.createIconButton(
                         headerLabelArea, "document-open-symbolic",
                         () => {
                             this.close()
@@ -198,8 +201,8 @@ export var ObjectInterfaceDialog = GObject.registerClass( {
                             b._objectBoxStButton.set_x_align( Clutter.ActorAlign.START )
                             b._objectBoxStButton.set_x_expand( false )
                             b._objectBoxStButton.set_y_expand( false )
-                            b.connect( "button-press-event", () => {
-                                this.popModal(); this.close( object ); return object
+                            b._objectBoxStButton.connect( "button-press-event", () => {
+                                this.popModal(); this._confirmed = true; this.close( object ); return object
                             } )
 
                             b.add_child( this._objectsSetBoxes[i]._objectBoxes[ii]._objectBoxStButton )
@@ -229,6 +232,7 @@ export var ObjectInterfaceDialog = GObject.registerClass( {
                 this._checkInput( o.get_text() )
                 if ( !this._inputError || !this.pushModal() ) {
                     this.popModal()
+                    this._confirmed = true
                     this.close( o.get_text() )
                     return o.get_text()
                 }
@@ -245,8 +249,9 @@ export var ObjectInterfaceDialog = GObject.registerClass( {
     }
     close( returnObject ) {
         try {
-            if ( !returnObject ) returnObject = this.stEntryUText.clutter_text.get_text()
-            this._callback( returnObject )
+            if ( this._confirmed )
+                this._callback( returnObject || this.stEntryUText.clutter_text.get_text() )
+            this._confirmed = false
             super.close()
         } catch ( e ) { dev.log( e ) }
     }
@@ -285,7 +290,17 @@ export var ObjectEditorDialog = GObject.registerClass( {
     _init(
         dialogInfoTextStyle = "", callback = null,
         editableObject = null, /*object to edit in the editor */
-        editableProperties = [], /* {propertyName: 'Property Display Name', disabled: false, hidden: false, subObjectEditableProperties: editableProperties,  icon: icon-name, hintText: 'Hint text to display for St.Entry', minwidth: 20, subObjectEditableProperties=[]}*/
+        /*{
+            propertyName: 'Property Display Name',
+            disabled: false,
+            hidden: false,
+            subObjectEditableProperties: editableProperties,
+            icon: icon-name,
+            hintText: 'Hint text to display for St.Entry',
+            minwidth: 20,
+            subObjectEditableProperties=[]
+        }*/
+        editableProperties = [],
         buttons = null,
         dialogStyle = null,
         contentLayoutBoxStyleClass = ""
@@ -294,10 +309,12 @@ export var ObjectEditorDialog = GObject.registerClass( {
         if ( typeof callback !== "function" ) throw TypeError( "ObjectEditorDialog._init error: callback must be a function" )
         this._callback = callback
 
-        if ( editableObject[1] ) { throw TypeError( "Array passed to object editor, only supports objects with simple types or sub objects as simple bool/int enums." ) }
+        if ( editableObject[1] ) {
+            throw TypeError( "Array passed to object editor, only supports objects with simple types or sub objects as simple bool/int enums." )
+        }
         this.returnObject = editableObject
         this.editableObject = editableObject
-        this._unreferencedObjectCopy = JSON.parse( JSON.stringify( editableObject ) )
+        //this._unreferencedObjectCopy = JSON.parse( JSON.stringify( editableObject ) )
 
 
         try {
@@ -360,7 +377,7 @@ export var ObjectEditorDialog = GObject.registerClass( {
             this.subObjectMasks = Array()
             this.propertyBoxClickCallbacks = Array()
             if ( editableObject ) {
-                editableObject.forEachEntry( function ( key, value, i ) {
+                utils.forEachEntry( editableObject, function ( key, value, i ) {
                     // Options for how to display each property section
                     this.propertyKeys[i] = key
                     this.propertyValues[i] = value
@@ -407,7 +424,7 @@ export var ObjectEditorDialog = GObject.registerClass( {
                     this._propertyBoxes[i] = new St.BoxLayout( this.propertyBoxStyle[i] )
                     if ( this.propertyIconStyle[i] != undefined && this.propertyIconStyle[i] != {} ) {
                         this._propertyBoxes[i].propertyBoxStNameIcon = new St.Icon( this.propertyIconStyle[i] )
-                        this._propertyBoxes[i].add_child( this._propertyBoxes[i].propertyBoxStNameIcon, this.propertyIconStyle[i] )
+                        this._propertyBoxes[i].add_child( this._propertyBoxes[i].propertyBoxStNameIcon )
                     }
 
                     Array( this._propertyBoxes[i] ).map( b => {
@@ -432,7 +449,8 @@ export var ObjectEditorDialog = GObject.registerClass( {
                         b.add_child( b._propertyBoxMessageButton )
                         return b
                     } )
-                    this.contentLayout.add_child( this._propertyBoxes[i], this.propertyBoxStyle[i] )
+                    // this.contentLayout.add_child( this._propertyBoxes[i], this.propertyBoxStyle[i] )
+                    this.contentLayout.add_child( this._propertyBoxes[i] )
 
 
                     //Property value editor element
@@ -440,12 +458,14 @@ export var ObjectEditorDialog = GObject.registerClass( {
                     if ( typeof value === "boolean" ) {
                         this._propertyBoxes[i]._propertyBoxEditorElement = new CheckBox.CheckBox( "" )
                         Array( this._propertyBoxes[i]._propertyBoxEditorElement ).map( b => {
-                            b.actor.checked = editableObject[key]
-                            b.actor.connect(
-                                "clicked", () => { editableObject[key] = this._propertyBoxes[i]._propertyBoxEditorElement.actor.checked }
+                            b.set_checked( editableObject[key] )
+                            b.connect(
+                                "clicked", () => {
+                                    editableObject[key] = this._propertyBoxes[i]._propertyBoxEditorElement.get_checked()
+                                }
                             )
                         } )
-                        this._propertyBoxes[i].add_child( this._propertyBoxes[i]._propertyBoxEditorElement.actor )
+                        this._propertyBoxes[i].add_child( this._propertyBoxes[i]._propertyBoxEditorElement )
                     } else if ( typeof value === "string" || typeof value === "number" ) {
                         this._propertyBoxes[i]._propertyBoxEditorElement = new St.Entry(
                             { style_class: "object-dialog-label", can_focus: true, text: "", x_align: Clutter.ActorAlign.FILL, x_expand: true }
@@ -486,14 +506,14 @@ export var ObjectEditorDialog = GObject.registerClass( {
 
                         // Check for valid types in the sub object
                         let containsBooleans = true
-                        value.forEachEntry( function ( subobjectKey, subobjectValue, i ) {
+                        utils.forEachEntry( value, function ( subobjectKey, subobjectValue, i ) {
                             if ( typeof subobjectValue != "boolean" ) containsBooleans = false
                         }, this )
                         if ( !containsBooleans ) return
 
                         // Build UI
                         this._propertyBoxes[i]._boolBox = Array()
-                        value.forEachEntry( function ( subobjectKey, subobjectValue, n ) {
+                        utils.forEachEntry( value, function ( subobjectKey, subobjectValue, n ) {
                             // Set up display masks for the subobject properties
                             let subObjectPropertyDisplayName = key
                             let subObjectPropertyDisabled = false // TODO
@@ -514,7 +534,7 @@ export var ObjectEditorDialog = GObject.registerClass( {
 
                             //Vertical box area for each subobject property
                             this._propertyBoxes[i]._boolBox[n] = new St.BoxLayout( {
-                                vertical    : true,
+                                orientation : Clutter.Orientation.VERTICAL,
                                 reactive    : true,
                                 track_hover : true,
                                 x_expand    : true,
@@ -536,16 +556,21 @@ export var ObjectEditorDialog = GObject.registerClass( {
                                 // Check box
                                 b._boolBoxEditorElement = new CheckBox.CheckBox( "" )
                                 b._boolBoxEditorElement.set_x_align( Clutter.ActorAlign.CENTER )
-                                b._boolBoxEditorElement.actor.checked = value[subobjectKey]
-                                b._boolBoxEditorElement.actor.connect(
+                                b._boolBoxEditorElement.set_checked( value[subobjectKey] )
+                                b._boolBoxEditorElement.connect(
                                     "clicked", () => { togglingFunction.call( this ) }
                                 )
                                 if ( !subObjectLabelOnly )
                                     b.add_child(
-                                        b._boolBoxEditorElement.actor
+                                        b._boolBoxEditorElement
                                     )
-                                // Toggle when pressing anywhere in the label/checkbox parent BoxLayout
-                                b.connect( "button-press-event", () => { togglingFunction.call( this ) } )
+                                // Make label clickable to toggle the checkbox
+                                b._boolBoxMessage.reactive = true
+                                b._boolBoxMessage.connect( "button-press-event", () => {
+                                    // Programmatically click the checkbox to trigger its toggle
+                                    b._boolBoxEditorElement.emit( "clicked" )
+                                    return Clutter.EVENT_STOP
+                                } )
 
                                 return b
                             } )
@@ -554,24 +579,38 @@ export var ObjectEditorDialog = GObject.registerClass( {
 
                             // Toggling Function used for boolean checkboxes
                             function togglingFunction() {
-                                // subObjectToggleValidationCallback will return values to set for any other bool in the subobject and whether to toggle the current one
-                                let [allowed,
-                                    boolValues] = subObjectToggleValidationCallback.call( this, value, n )
-                                if ( !boolValues ) boolValues = Object.values( value )
-                                if ( allowed ) boolValues[n] = value[subobjectKey] = value[subobjectKey] ? false : true
-                                this._propertyBoxes[i]._boolBox.forEach( function ( box, x ) {
-                                    if ( boolValues[x] ) {
-                                        value[Object.keys( value )[x]] = boolValues[x]
+                                // Get the checkbox's current state (after auto-toggle)
+                                const newCheckedState = this._propertyBoxes[i]._boolBox[n]._boolBoxEditorElement.get_checked()
+
+                                // Create proposed state array with the new value
+                                let proposedBoolValues = Object.values( value )
+                                proposedBoolValues[n] = newCheckedState
+
+                                // Run validation callback
+                                let [allowed, validatedBoolValues] = subObjectToggleValidationCallback.call( this, value, n )
+
+                                // Determine final values: use validated values if provided, otherwise use proposed values
+                                let finalBoolValues = validatedBoolValues || proposedBoolValues
+
+                                // If not allowed, revert to original state
+                                if ( !allowed ) {
+                                    finalBoolValues[n] = value[subobjectKey]
+                                }
+
+                                // Update all checkboxes and data model to match final state
+                                this._propertyBoxes[i]._boolBox.forEach( ( _box, x ) => {
+                                    const key = Object.keys( value )[x]
+                                    value[key] = finalBoolValues[x]
+
+                                    if ( finalBoolValues[x] ) {
                                         this._propertyBoxes[i]._boolBox[x]._boolBoxMessage.remove_style_class_name( "label-disabled" )
                                         this._propertyBoxes[i]._boolBox[x]._boolBoxMessage.add_style_class_name( "label-enabled" )
-                                        this._propertyBoxes[i]._boolBox[x]._boolBoxEditorElement.actor.set_checked( boolValues[x] )
                                     } else {
-                                        value[Object.keys( value )[x]] = boolValues[x]
                                         this._propertyBoxes[i]._boolBox[x]._boolBoxMessage.remove_style_class_name( "label-enabled" )
                                         this._propertyBoxes[i]._boolBox[x]._boolBoxMessage.add_style_class_name( "label-disabled" )
-                                        this._propertyBoxes[i]._boolBox[x]._boolBoxEditorElement.actor.set_checked( boolValues[x] )
                                     }
-                                }, this )
+                                    this._propertyBoxes[i]._boolBox[x]._boolBoxEditorElement.set_checked( finalBoolValues[x] )
+                                } )
                             }
 
                         }, this )

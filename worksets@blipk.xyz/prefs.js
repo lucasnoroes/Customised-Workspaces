@@ -1,7 +1,7 @@
 /*
  * Customised Workspaces extension for Gnome 3
  * This file is part of the Customised Workspaces Gnome Extension for Gnome 3
- * Copyright (C) 2023 A.D. http://github.com/blipk
+ * Copyright (C) http://github.com/blipk
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,10 +31,11 @@ import { ExtensionPreferences, gettext as _ } from "resource:///org/gnome/Shell/
 
 
 export default class MyExtensionPreferences extends ExtensionPreferences {
-    fillPreferencesWindow( window ) {
+    async fillPreferencesWindow( window ) {
         const settings = this.getSettings( "org.gnome.shell.extensions.worksets" )
         window._settings = settings
-        settings.set_boolean( "show-panel-indicator", false )
+
+        // settings.set_boolean( "show-panel-indicator", false )
         settings.set_boolean( "show-panel-indicator", true )
 
         window.title = `${this.metadata.name} Preferences`

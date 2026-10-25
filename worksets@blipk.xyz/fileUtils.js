@@ -1,7 +1,7 @@
 /*
  * Customised Workspaces extension for Gnome 3
  * This file is part of the Customised Workspaces Gnome Extension for Gnome 3
- * Copyright (C) 2023 A.D. http://github.com/blipk
+ * Copyright (C) http://github.com/blipk
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,7 +32,7 @@ import { gettext as _ } from "resource:///org/gnome/shell/extensions/extension.j
 
 // Internal imports
 import { WorksetsInstance as Me } from "./extension.js"
-import * as dev from "./dev.js"
+// import * as dev from "./dev.js"
 
 // Directory and file paths for resources
 export const USER_CONF_DIR = GLib.get_user_config_dir()
@@ -51,6 +51,24 @@ export const INSTALL_DIR = () => GLib.build_pathv(
 export const RES_DIR = () => GLib.build_pathv( "/", [INSTALL_DIR(), "res"] )
 export const CONF_DIR = () => GLib.build_pathv( "/", [USER_CONF_DIR, Me.uuid] )
 export const APP_CHOOSER_EXEC = () => GLib.build_filenamev( [INSTALL_DIR(), "lib", "ui", "appChooser.js"] )
+
+/**
+ * Converts a local path or a URI (for example the GNOME "picture-uri" setting) to a local path.
+ * Escaped characters such as "%20" are decoded.
+ * @param {string} pathOrUri - A local path, or a URI such as "file:///home/user/My%20Wallpaper.png"
+ * @returns {string} The local path, or "" if the value is empty or is not a local file
+ */
+export const uriToPath = ( pathOrUri ) => {
+    if ( !pathOrUri ) return ""
+    return Gio.File.new_for_commandline_arg( pathOrUri ).get_path() ?? ""
+}
+
+/**
+ * Converts a local path to a "file://" URI with correct escaping.
+ * @param {string} path - A local path
+ * @returns {string} The URI for the path
+ */
+export const pathToUri = ( path ) => Gio.File.new_for_path( path ).get_uri()
 
 export function checkExists( path ) {
     let result = false
@@ -77,7 +95,7 @@ export function enumarateDirectoryChildren(
 
     let directoryFile = Gio.file_new_for_path( directory )
     if ( !directoryFile.query_exists( null ) ) throw Error( directory + " not found" )
-    let children = directoryFile.enumerate_children( "standard::name,standard::type", Gio.FileQueryInfoFlags.NONE, null )
+    let children = directoryFile.enumerate_children( "standard::name,standard::type", Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null )
 
     let fileIterator
     while ( ( fileIterator = children.next_file( null ) ) != null ) {
@@ -106,8 +124,11 @@ export function enumarateDirectoryChildren(
     return childrenFilePropertiesArray
 }
 
-export function saveToFile( object, filename, directory = null, raw = false, append = false, async = false ) {
+export function saveToFile( object, filename, directory = null, raw = false, append = false, async = true ) {
     directory = directory || CONF_DIR()
+    // S5: Validate filename does not contain path separators
+    if ( filename.includes( "/" ) || filename.includes( "\\" ) )
+        throw Error( "Invalid filename: must not contain path separators" )
     let savePath = GLib.build_filenamev( [directory,
         filename] )
     let outBuff
@@ -117,14 +138,14 @@ export function saveToFile( object, filename, directory = null, raw = false, app
     let contents = new GLib.Bytes( outBuff )
 
     // Make sure dir exists
-    GLib.mkdir_with_parents( directory, parseInt( "0775", 8 ) )
+    GLib.mkdir_with_parents( directory, parseInt( "0700", 8 ) )
     let file = Gio.file_new_for_path( savePath )
     if ( async ) {
         if ( append ) {
             file.append_to_async(
                 Gio.FileCreateFlags.NONE,
                 GLib.PRIORITY_DEFAULT, null,
-                function ( obj, res ) { aSyncSaveCallback( obj, res, contents ) }
+                function ( obj, res ) { aSyncSaveCallback( obj, res, contents, true ) }
             )
         } else {
             file.replace_async(
@@ -149,8 +170,8 @@ export function saveToFile( object, filename, directory = null, raw = false, app
     }
 }
 
-export function aSyncSaveCallback( obj, res, contents ) {
-    let stream = obj.replace_finish( res )
+export function aSyncSaveCallback( obj, res, contents, isAppend = false ) {
+    let stream = isAppend ? obj.append_to_finish( res ) : obj.replace_finish( res )
     stream.write_bytes_async( contents, GLib.PRIORITY_DEFAULT, null, function ( w_obj, w_res ) {
         w_obj.write_bytes_finish( w_res ); stream.close( null )
     } )
@@ -165,7 +186,7 @@ export function loadJSObjectFromFile( filename = "session.json", directory = nul
 
     let file = Gio.file_new_for_path( loadPath )
 
-    if ( !GLib.file_test( loadPath, GLib.FileTest.EXISTS ) ) { throw Error( "File does not exist: " + loadPath ) }
+    if ( !file.query_exists( null ) ) { throw Error( "File does not exist: " + loadPath ) }
     if ( async === true ) {
         if ( typeof callback !== "function" ) { throw TypeError( "loadJSObjectFromFile callback must be a function" ) }
 

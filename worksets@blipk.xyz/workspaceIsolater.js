@@ -1,7 +1,7 @@
 /*
  * Customised Workspaces extension for Gnome 3
  * This file is part of the Customised Workspaces Gnome Extension for Gnome 3
- * Copyright (C) 2023 A.D. http://github.com/blipk
+ * Copyright (C) http://github.com/blipk
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -25,10 +25,10 @@
  */
 
 // External imports
-import Meta from "gi://Meta"
+// import Meta from "gi://Meta"
+import GLib from "gi://GLib"
 import Shell from "gi://Shell"
-import GObject from "gi://GObject"
-const AppSystem = Shell.AppSystem.get_default()
+// import GObject from "gi://GObject"
 
 import * as Main from "resource:///org/gnome/shell/ui/main.js"
 import * as AppDisplay from "resource:///org/gnome/shell/ui/appDisplay.js"
@@ -46,14 +46,16 @@ import * as dev from "./dev.js"
 export class WorkspaceIsolator {
     constructor() {
         try {
+            // Get the shell singleton here, not when the module loads (before enable())
+            const AppSystem = Shell.AppSystem.get_default()
+            // S9: Guard against double-construction patching already-patched methods
+            if ( AppSystem._workspace_isolated_dash_nyuki_get_running ) return
+
             // Extend AppSystem to only return applications running on the active workspace
             AppSystem._workspace_isolated_dash_nyuki_get_running = AppSystem.get_running
             AppSystem.get_running = function () {
                 let running = AppSystem._workspace_isolated_dash_nyuki_get_running()
-                if ( Main.overview.visible )
-                    return running.filter( WorkspaceIsolator.isActiveApp )
-                else
-                    return running
+                return running.filter( WorkspaceIsolator.isActiveApp )
             }
             // Extend App's activate to open a new window if no windows exist on the active workspace
             Shell.App.prototype._workspace_isolated_dash_nyuki_activate = Shell.App.prototype.activate
@@ -91,6 +93,7 @@ export class WorkspaceIsolator {
 
     destroy() {
         // Revert the AppSystem function
+        const AppSystem = Shell.AppSystem.get_default()
         if ( AppSystem._workspace_isolated_dash_nyuki_get_running ) {
             AppSystem.get_running = AppSystem._workspace_isolated_dash_nyuki_get_running
             delete AppSystem._workspace_isolated_dash_nyuki_get_running
@@ -124,20 +127,27 @@ export class WorkspaceIsolator {
 WorkspaceIsolator.isActiveApp = function ( app ) {
     return app.is_on_workspace( Me.gWorkspaceManager.get_active_workspace() )
 }
-// Refresh dash
+// Refresh dash (debounced)
+WorkspaceIsolator._refreshPending = 0
 WorkspaceIsolator.refresh = function () {
-    // Update icon state of all running applications
-    let running
-    if ( AppSystem._workspace_isolated_dash_nyuki_get_running )
-        running = AppSystem._workspace_isolated_dash_nyuki_get_running()
-    else
-        running = AppSystem.get_running()
+    if ( WorkspaceIsolator._refreshPending ) GLib.Source.remove( WorkspaceIsolator._refreshPending )
+    WorkspaceIsolator._refreshPending = GLib.timeout_add( GLib.PRIORITY_DEFAULT, 50, () => {
+        WorkspaceIsolator._refreshPending = 0
+        // Update icon state of all running applications
+        const AppSystem = Shell.AppSystem.get_default()
+        let running
+        if ( AppSystem._workspace_isolated_dash_nyuki_get_running )
+            running = AppSystem._workspace_isolated_dash_nyuki_get_running()
+        else
+            running = AppSystem.get_running()
 
-    running.forEach( function ( app ) {
-        app.notify( "state" )
+        running.forEach( function ( app ) {
+            app.notify( "state" )
+        } )
+
+        // Update applications shown in the dash
+        let dash = Main.overview.dash
+        dash._queueRedisplay()
+        return false
     } )
-
-    // Update applications shown in the dash
-    let dash = Main.overview._dash || Main.overview.dash
-    dash._queueRedisplay()
 }

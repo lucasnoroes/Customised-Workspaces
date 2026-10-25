@@ -1,3 +1,13 @@
+> **Maintenance Mode Notice**
+>
+> This extension is in **maintenance mode**. Future updates and bugfixes are not guaranteed.
+>
+> Contributions are welcome! You can submit PRs that address issues identified in the [AUDIT_REPORT.md](AUDIT_REPORT.md).
+>
+> For GNOME Shell version compatibility PRs, the changes **must be verified by at least 1 other user** in the PR comments before merging.
+
+---
+
 ## Customised Workspaces - Gnome Shell Extension
 
 <p align="left">
@@ -6,7 +16,6 @@
     </a>
 </p>
 
-[![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/donate?hosted_button_id=T35UZZSUMK66L)
 [![Website](https://img.shields.io/badge/Homepage-blue)](https://github.com/blipk/Customised-Isolated-Workspaces)
 
 Customised Workspaces enables creating isolated and customised workspaces.
@@ -15,6 +24,7 @@ Customised Workspaces enables creating isolated and customised workspaces.
 * Applications will only show on the dash in their active workspace
 * Set up a custom background for each workspace
 * Set up the custom dash favourites for each workspace
+* Add an application to the dash favourites of all workspaces at once, at the position that you choose
 * Edit your load settings and save your customised environments
 
 
@@ -44,6 +54,13 @@ git clone https://github.com/blipk/Customised-Workspaces.git extensions
 
 ###### Clickable installer in the release or run
 `chmod +x install.sh && ./install.sh`
+
+### Development
+
+###### End-to-end tests
+
+The extension has end-to-end tests that run it in an isolated headless GNOME Shell, with real pointer and keyboard input: `pnpm run test:e2e`.
+See [testing/e2e/README.md](testing/e2e/README.md).
 
 ### Support
 

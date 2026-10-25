@@ -2,3 +2,10 @@ node_modules
 
 debug.log
 session.json
+
+.claude
+
+venv
+
+# End-to-end test output (results, logs, screenshots, isolated home directories)
+testing/e2e/out/

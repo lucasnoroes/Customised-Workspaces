@@ -1,7 +1,7 @@
 /*
  * Customised Workspaces extension for Gnome 3
  * This file is part of the Customised Workspaces Gnome Extension for Gnome 3
- * Copyright (C) 2023 A.D. http://github.com/blipk
+ * Copyright (C) http://github.com/blipk
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,21 +31,24 @@ import GObject from "gi://GObject"
 import Clutter from "gi://Clutter"
 
 import { gettext as _ } from "resource:///org/gnome/shell/extensions/extension.js"
-import * as extensionUtils from "resource:///org/gnome/shell/misc/extensionUtils.js"
 
 import * as Main from "resource:///org/gnome/shell/ui/main.js"
 import * as util from "resource:///org/gnome/shell/misc/util.js"
 import * as popupMenu from "resource:///org/gnome/shell/ui/popupMenu.js"
 import * as panelMenu from "resource:///org/gnome/shell/ui/panelMenu.js"
-import * as boxpointer from "resource:///org/gnome/shell/ui/boxpointer.js"
 
 //Internal imports
 import { WorksetsInstance as Me } from "./extension.js"
 import * as dev from "./dev.js"
+import * as compat from "./compat.js"
 import * as utils from "./utils.js"
 import * as uiUtils from "./lib/ui/uiUtils.js"
 import * as dialogs from "./lib/ui/dialogs.js"
 import * as fileUtils from "./fileUtils.js"
+import * as inputValidator from "./inputValidator.js"
+
+// Name that the app chooser shows in "Will be added to '...' favourites"
+const ALL_ENVIRONMENTS_LABEL = "All Environments"
 
 export var WorksetsIndicator = GObject.registerClass( {
     GTypeName: "WorksetsIndicator"
@@ -60,6 +63,11 @@ export var WorksetsIndicator = GObject.registerClass( {
             // Set up menu box to build into
             let hbox = new St.BoxLayout( { style_class: "panel-status-menu-box worksets-indicator-hbox" } )
             this.icon = new St.Icon( { icon_name: "preferences-desktop-workspaces", style_class: "system-status-icon worksets-indicator-icon" } )
+            if ( Me.session.activeSession.Options.GrayscaleIcon )
+                this.icon.add_effect_with_name(
+                    "grayscale",
+                    new Clutter.DesaturateEffect( { factor: 1.0 } )
+                )
             hbox.add_child( this.icon );
             //let buttonText = new St.Label(    {text: (''), y_align: Clutter.ActorAlign.CENTER }   );
             //hbox.add_child(buttonText);
@@ -100,65 +108,165 @@ export var WorksetsIndicator = GObject.registerClass( {
     //main UI builder
     _buildOptionsMenuItems() {
         // Sub menu for option switches
-        Me.session.activeSession.Options.forEachEntry( function ( optionName, optionValue ) {
-            const settingsKeyName = utils.textToKebabCase( optionName )
-            const summary = Me.settings.settings_schema.get_key( settingsKeyName ).get_summary()
-            const description = Me.settings.settings_schema.get_key( settingsKeyName ).get_description()
-            const isBoolOption = typeof Me.session.activeSession.Options[optionName] === "boolean"
-            const optionMenuItem = isBoolOption
-                ? new popupMenu.PopupSwitchMenuItem( _( summary ), Me.session.activeSession.Options[optionName], { reactive: true } )
-                : new popupMenu.PopupSubMenuMenuItem( _( summary ), false )
-            optionMenuItem.optionName = optionName
-            const toggleOpt = () => {
-                Me.session.activeSession.Options[optionName] = !Me.session.activeSession.Options[optionName]
-                Me.session.applySession()
-            }
-            let apply
-            switch ( optionName ) {
-            case "IsolateWorkspaces":
-                apply = () => { Me.workspaceManager.activateIsolater() }
-                break
-            case "ReverseMenu":
-                apply = () => { toggleOpt(); Me.session.resetIndicator() }
-                break
-            case "ShowWorkspaceOverly":
-                apply = () => { toggleOpt(); Me.workspaceViewManager.refreshOverview() }
-                break
-            case "CliSwitch":
-                apply = () => {
-                    const buttonStyles = [
-                        {
-                            label  : "Cancel",
-                            key    : Clutter.KEY_Escape,
-                            action : function () { this.close( " " ) }
-                        },
-                        { label: "Done", default: true }
-                    ]
-                    const dialogMsg = "Please enter a valid terminal command.\nUse $CWORKSPACE var for the workspace name\nSet empty to not run anything"
-                    const getWorksetSwitchCLIArgs = new dialogs.ObjectInterfaceDialog(
-                        dialogMsg,
-                        ( returnText ) => {
-                            if ( !returnText ) return
-                            returnText = returnText.trim()
-                            if ( returnText === "" ) return
+        utils.forEachEntry(
+            Me.session.activeSession.Options,
+            function ( optionName, optionValue ) {
+
+                // Internal value, and the last position that "Add app to all environments" used
+                if ( optionName === "AppchooserSha256" || optionName === "AllEnvironmentsAppPosition" )
+                    return
+
+                const settingsKeyName = utils.textToKebabCase( optionName )
+                const summary = Me.settings.settings_schema.get_key( settingsKeyName ).get_summary()
+                const description = Me.settings.settings_schema.get_key( settingsKeyName ).get_description()
+                const isBoolOption = typeof Me.session.activeSession.Options[optionName] === "boolean"
+                const optionMenuItem = isBoolOption
+                    ? new popupMenu.PopupSwitchMenuItem( _( summary ), Me.session.activeSession.Options[optionName], { reactive: true } )
+                    : new popupMenu.PopupSubMenuMenuItem( _( summary ), false )
+                optionMenuItem.optionName = optionName
+                const toggleOpt = ( apply = true ) => {
+                // dev.log( `toggle ${optionName} ${this.reopeningMenu}` )
+                    if ( this.reopeningMenu ) return
+                    Me.session.activeSession.Options[optionName] = !Me.session.activeSession.Options[optionName]
+                    if ( !apply ) return
+                    Me.session.applySession()
+                }
+                let apply
+                switch ( optionName ) {
+                case "IsolateWorkspaces":
+                    apply = () => {
+                        Me.workspaceManager.activateIsolater()
+                    }
+                    break
+                case "ReverseMenu":
+                    apply = () => { toggleOpt(); Me.session.resetIndicator() }
+                    break
+                case "ShowWorkspaceOverly":
+                    apply = () => { toggleOpt(); Me.workspaceViewManager.refreshOverview() }
+                    break
+                case "CliSwitch":
+                    apply = () => {
+                        const dialogMsg = "Please enter a valid terminal command.\nUse $CWORKSPACE var for the workspace name\nSet empty to not run anything"
+                        this._promptForText( dialogMsg, Me.session.activeSession.Options["CliSwitch"], ( returnText ) => {
                             Me.session.activeSession.Options["CliSwitch"] = returnText
                             Me.session.applySession()
                             uiUtils.showUserNotification( "CLI command saved." )
-                        },
-                        true, false, [], [], buttonStyles, Me.session.activeSession.Options["CliSwitch"]
-                    )
+                        } )
+                    }
+                    break
+                default: apply = toggleOpt
                 }
-                break
-            default: apply = toggleOpt
+                const eventName = isBoolOption ? "toggled" : "button-press-event"
+                optionMenuItem.pressHandler = optionMenuItem.connect(
+                    eventName,
+                    () => {
+                        if ( this._syncingOptions ) return
+                        apply()
+                    }
+                )
+                if ( isBoolOption )
+                    optionMenuItem.activate = () => {
+                        if ( optionMenuItem._switch.mapped ) optionMenuItem.toggle()
+                    }
+
+                uiUtils.createTooltip( optionMenuItem, { msg: description, delay: 1400 } )
+                this.optionsMenuItems.push( optionMenuItem )
+                this.optionsMenuItem.menu.addMenuItem( optionMenuItem )
+            }, this
+        )
+
+        // This is an action, not a setting: add an application to the favourites of every environment (#69)
+        const addToAllMenuItem = new popupMenu.PopupImageMenuItem( _( "Add app to all environments" ), "list-add-symbolic" )
+        addToAllMenuItem.connect( "activate", () => this._addApplicationToAllEnvironments() )
+        uiUtils.createTooltip( addToAllMenuItem, {
+            msg   : "Choose an application and its position, to add it to the favourites of all environments",
+            delay : 1400
+        } )
+        this.optionsMenuItems.push( addToAllMenuItem )
+        this.optionsMenuItem.menu.addMenuItem( addToAllMenuItem )
+    }
+
+    /**
+     * Adds an application to the favourites of all environments (#69), in one flow:
+     * the user chooses the application, and then its position.
+     */
+    _addApplicationToAllEnvironments() {
+        this._chooseApplication( ALL_ENVIRONMENTS_LABEL, ( favApp ) => this._promptForFavoritePosition( favApp ) )
+    }
+
+    /**
+     * Asks for the position of an application in the favourites of all environments, and then adds it.
+     * The dialog shows the last position that was used, thus Enter keeps it. Cancel adds nothing.
+     * @param {{name: string, displayName: string, icon: string, exec: string}} favApp - The validated application
+     * @param {string} [defaultText] - Text for the entry. The last position that was used, if not given.
+     */
+    _promptForFavoritePosition( favApp, defaultText = String( Me.session.activeSession.Options.AllEnvironmentsAppPosition ) ) {
+        // The dialog cuts long lines, so keep each line short
+        const dialogMsg = `Position for '${favApp.displayName || favApp.name}'\n`
+            + "in the favourites of all environments.\n"
+            + "1 is the first, 2 is the second.\n"
+            + "-1 is the last, -2 is the second last."
+        this._promptForText( dialogMsg, defaultText, ( returnText ) => {
+            const position = inputValidator.InputValidator.validateFavoritePosition( returnText )
+            if ( position === null ) {
+                uiUtils.showUserNotification( "The position must be a whole number, for example 1 or -1." )
+                this._promptForFavoritePosition( favApp, returnText )
+                return
             }
-            const eventName = isBoolOption ? "toggled" : "button_release_event"
-            optionMenuItem.pressHandler = optionMenuItem.connect( eventName, () => { apply() } )
-            if ( isBoolOption )
-                optionMenuItem.activate = () => { if ( optionMenuItem._switch.mapped ) optionMenuItem.toggle() }
-            uiUtils.createTooltip( optionMenuItem, { msg: description, delay: 1400 } )
-            this.optionsMenuItems.push( optionMenuItem )
-            this.optionsMenuItem.menu.addMenuItem( optionMenuItem )
-        }, this )
+            Me.session.addFavoriteToAllWorksets( favApp, position )
+        }, { selectAll: true } )
+    }
+
+    /**
+     * Shows a dialog that asks the user for a line of text.
+     * @param {string} message - The text above the text entry
+     * @param {string} defaultText - The text in the entry when the dialog opens
+     * @param {function(string): void} onText - Called with the trimmed text when the user selects Done and the text is not empty
+     * @param {object} [options] - Options
+     * @param {boolean} [options.selectAll=false] - Select the default text, so that typed text replaces it
+     */
+    _promptForText( message, defaultText, onText, { selectAll = false } = {} ) {
+        const buttonStyles = [
+            {
+                label  : "Cancel",
+                key    : Clutter.KEY_Escape,
+                action : function () { this.close( " " ) }
+            },
+            { label: "Done", default: true }
+        ]
+        const dialog = new dialogs.ObjectInterfaceDialog(
+            message,
+            ( returnText ) => {
+                const text = returnText?.trim()
+                if ( text ) onText( text )
+            },
+            true, false, [], [], buttonStyles, defaultText
+        )
+        if ( selectAll ) dialog.stEntryUText?.clutter_text.set_selection( 0, -1 )
+    }
+
+    /**
+     * Opens the application chooser and gives the chosen application to a callback.
+     * @param {string} targetName - Name that the chooser shows in "Will be added to '...' favourites"
+     * @param {function({name: string, displayName: string, icon: string, exec: string}): void} onChosen - Called with the validated application
+     */
+    _chooseApplication( targetName, onChosen ) {
+        utils.spawnWithCallback(
+            null,
+            [fileUtils.APP_CHOOSER_EXEC(), "-w", targetName],
+            GLib.get_environ(),
+            0,
+            null,
+            ( resource ) => {
+                try {
+                    if ( !resource ) return
+                    // S14: Validate FavApp from untrusted subprocess output
+                    const favApp = inputValidator.InputValidator.validateFavApp( JSON.parse( resource ) )
+                    if ( favApp === null ) return
+                    onChosen( favApp )
+                } catch ( e ) { dev.log( e ) }
+            }
+        )
     }
     _buildMenu() {
         try {
@@ -166,7 +274,7 @@ export var WorksetsIndicator = GObject.registerClass( {
             this.optionsMenuItem.icon.icon_name = "org.gnome.tweaks"
             this.optionsMenuItems = []
             this._buildOptionsMenuItems()
-            this.optionsMenuItem.connect( "button_release_event", () => {
+            this.optionsMenuItem.connect( "button-press-event", () => {
                 this.optionsMenuItems.forEach( m => m.destroy() )
                 this.optionsMenuItems = []
                 this._buildOptionsMenuItems()
@@ -204,12 +312,18 @@ export var WorksetsIndicator = GObject.registerClass( {
             let sessionMenuItem = new popupMenu.PopupImageMenuItem( "New Environment", "document-new-symbolic" )
             sessionMenuItem.label.set_x_expand( true )
             this.menu.sessionMenuItem = sessionMenuItem
-            sessionMenuItem.connect( "activate", () => { Me.session.newWorkset(); this._refreshMenu() } )
+            sessionMenuItem.connect( "activate", () => {
+                Me.session.newWorkset()
+                this._refreshMenu()
+            } )
 
             uiUtils.createIconButton(
                 sessionMenuItem,
                 "document-save-symbolic",
-                () => { Me.session.loadObject(); this._refreshMenu() },
+                () => {
+                    Me.session.loadObject()
+                    this._refreshMenu()
+                },
                 {}, { msg: "Load a custom workspace from backups" }
             )
             // uiUtils.createIconButton(
@@ -219,8 +333,7 @@ export var WorksetsIndicator = GObject.registerClass( {
             // );
 
             // Orient menu
-            // TODO: Find where Extension.state has moved to
-            const reverseMenu = Me.gExtensions.dash2panel()?.state === extensionUtils.ExtensionState.ENABLED
+            const reverseMenu = Me.gExtensions.dash2panelActive()
                 ? true : Me.session.activeSession.Options.ReverseMenu
             if ( reverseMenu ) {
                 this.menu.addMenuItem( this.viewSection )
@@ -254,7 +367,10 @@ export var WorksetsIndicator = GObject.registerClass( {
     _addWorksetMenuItemEntry( workSetsArrayBuffer, worksetIndex ) {
         try {
             let menuItem = new popupMenu.PopupSubMenuMenuItem( "", true )
-            menuItem.buttonPressId = menuItem.connect( "button_release_event", () => { this._worksetSubMenuRefresh( menuItem ) } )
+            menuItem.buttonPressId = menuItem.connect( "button-press-event", () => {
+                this._worksetSubMenuRefresh( menuItem )
+                return Clutter.EVENT_STOP
+            } )
 
             // Connect menu items to worksets array
             menuItem.workset = workSetsArrayBuffer
@@ -267,9 +383,15 @@ export var WorksetsIndicator = GObject.registerClass( {
                 "starred-symbolic" : ["non-starred-symbolic", "starred-symbolic"]
             let iconOpenNew_nameuri = ( activeIndex > -1 ) ? "window-close-symbolic" : "window-new-symbolic"
             let iconOpenHere_nameuri = ( activeIndex > -1 ) ? "view-reveal-symbolic" : "go-jump-symbolic"
-            let openCloseCommand = ( activeIndex > -1 )
-                ? () => { Me.session.closeWorkset( menuItem.workset ); this._refreshMenu() }
-                : () => { Me.session.displayWorkset( menuItem.workset, true ); this._refreshMenu() }
+            let openCloseCommand = () => {
+                ( activeIndex > -1 )
+                    ? Me.session.closeWorkset( menuItem.workset )
+                    : Me.session.displayWorkset( menuItem.workset, true )
+
+                this._refreshMenu()
+                Me.workspaceViewManager.refreshOverview()
+            }
+
             let openCloseMsg = ( activeIndex > -1 )
                 ? "Disengage '" + menuItem.workset.WorksetName + "'"
                 : "Load '" + menuItem.workset.WorksetName + "' in a new workspace"
@@ -278,12 +400,19 @@ export var WorksetsIndicator = GObject.registerClass( {
                 : "Load '" + menuItem.workset.WorksetName + "' in this workspace"
             uiUtils.createIconButton(
                 menuItem, icondefault_nameuri,
-                () => { Me.session.setDefaultWorkset( menuItem.workset ); this._refreshMenu(); Me.workspaceViewManager.refreshOverview() },
+                () => {
+                    Me.session.setDefaultWorkset( menuItem.workset )
+                    this._refreshMenu()
+                    Me.workspaceViewManager.refreshOverview()
+                },
                 true, { msg: "Set '" + menuItem.workset.WorksetName + "' as the default" }
             )
             uiUtils.createIconButton(
                 menuItem, "document-edit-symbolic",
-                () => { Me.session.editWorkset( menuItem.workset ); this._refreshMenu() },
+                () => {
+                    Me.session.editWorkset( menuItem.workset )
+                    this._refreshMenu()
+                },
                 {}, { msg: "Edit '" + menuItem.workset.WorksetName + "'" }
             )
             uiUtils.createIconButton( menuItem, iconOpenNew_nameuri, openCloseCommand, {}, { msg: openCloseMsg } )
@@ -302,7 +431,9 @@ export var WorksetsIndicator = GObject.registerClass( {
             let icon = uiUtils.createIconButton(
                 ornamentIcon, iconOpenHere_nameuri,
                 () => {
-                    Me.session.displayWorkset( menuItem.workset ); this._refreshMenu()
+                    Me.session.displayWorkset( menuItem.workset )
+                    this._refreshMenu()
+                    Me.workspaceViewManager.refreshOverview()
                 },
                 { icon_size: 14 }, { msg: viewOpenMessage }
             )
@@ -313,13 +444,16 @@ export var WorksetsIndicator = GObject.registerClass( {
             if ( Me.session.activeSession.Default == menuItem.workset.WorksetName ) {
                 defaultMenuItem = menuItem
                 this.defaultSection.addMenuItem( menuItem, 0 )
-                this.defaultSection.moveMenuItem( defaultMenuItem, 0 )
             } else if ( Me.workspaceManager.activeWorksetName == menuItem.workset.WorksetName ) {
                 activeMenuItem = menuItem
                 this.defaultSection.addMenuItem( menuItem, 0 )
-                this.defaultSection.moveMenuItem( activeMenuItem, 1 )
-            } else ( activeIndex > -1 )
-                ? this.favoritesSection.addMenuItem( menuItem, 0 ) : this.historySection.addMenuItem( menuItem, 0 )
+            } else {
+                if ( activeIndex > -1 ) {
+                    this.favoritesSection.addMenuItem( menuItem, 0 )
+                } else {
+                    this.historySection.addMenuItem( menuItem, 0 )
+                }
+            }
 
             if ( activeMenuItem )
                 this.defaultSection.moveMenuItem( activeMenuItem, 1 )
@@ -359,7 +493,7 @@ export var WorksetsIndicator = GObject.registerClass( {
                             duration         : 250,
                             mode             : Clutter.AnimationMode.EASE_OUT_EXPO,
                         } )
-                        if ( pass ) menuItem.worksetPopupMenu.menu.close( boxpointer.PopupAnimation.FULL )
+                        if ( pass ) menuItem.worksetPopupMenu.menu.close( compat.menuAnimation() )
                         // Wait for the close animation
                         Me.worksetsIndicator.signals.add( GLib.timeout_add( null, 100, function () { wspopupMenu.destroy(); return false } ) )
                         wspopupMenu.menuItem.worksetPopupMenu = null
@@ -378,7 +512,7 @@ export var WorksetsIndicator = GObject.registerClass( {
 
                 } catch ( e ) { dev.log( e ) }
             }
-            menuItem.worksetPopupMenu.connect( "button_release_event", () => {
+            menuItem.worksetPopupMenu.connect( "button-press-event", () => {
                 menuItem.worksetPopupMenu.menu.bye()
                 return Clutter.SOURCE_REMOVE
                 //return Clutter.EVENT_STOP;
@@ -393,14 +527,22 @@ export var WorksetsIndicator = GObject.registerClass( {
             } )
             uiUtils.createIconButton(
                 menuItem.worksetPopupMenu, "document-save-symbolic",
-                () => { Me.session.saveWorkset( menuItem.workset ); this._refreshMenu() },
+                () => {
+                    Me.session.saveWorkset( menuItem.workset )
+                    this._refreshMenu()
+                },
                 {}, { msg: "Save a backup of '" + menuItem.workset.WorksetName + "'" }
             )
 
             if ( Me.session.Worksets.length > 1 )
                 uiUtils.createIconButton(
                     menuItem.worksetPopupMenu, "user-trash-symbolic",
-                    () => { menuItem.worksetPopupMenu.menu.bye(); Me.session.deleteWorkset( menuItem.workset ); this._refreshMenu() },
+                    () => {
+                        menuItem.worksetPopupMenu.menu.bye()
+                        Me.session.deleteWorkset( menuItem.workset )
+                        this._refreshMenu()
+                        Me.workspaceViewManager.refreshOverview()
+                    },
                     {}, { msg: "Delete '" + menuItem.workset.WorksetName + "' and save a backup" }
                 )
 
@@ -411,7 +553,10 @@ export var WorksetsIndicator = GObject.registerClass( {
             // Background info
             menuItem.bgMenuButton = new popupMenu.PopupBaseMenuItem( { style_class: "bg-display" } )
             menuItem.bgMenuButton.content_gravity = Clutter.ContentGravity.RESIZE_ASPECT
-            const [img, error] = uiUtils.setImage( menuItem.bgMenuButton, Me.session.isDarkMode ? menuItem.workset.BackgroundImageDark : menuItem.workset.BackgroundImage )
+            const [img, error] = uiUtils.setImage(
+                menuItem.bgMenuButton,
+                Me.session.isDarkMode ? menuItem.workset.BackgroundImageDark : menuItem.workset.BackgroundImage
+            )
             if ( error ) {
                 Me.session.isDarkMode ? menuItem.workset.BackgroundImageDark = "" : menuItem.workset.BackgroundImage = ""
                 Me.session.applySession()
@@ -419,7 +564,7 @@ export var WorksetsIndicator = GObject.registerClass( {
             viewArea.addMenuItem( menuItem.bgMenuButton )
 
             let backgroundStyleOptionsBox = new St.BoxLayout( {
-                vertical    : true,
+                orientation : Clutter.Orientation.VERTICAL,
                 reactive    : true,
                 track_hover : true,
                 x_expand    : true,
@@ -435,8 +580,13 @@ export var WorksetsIndicator = GObject.registerClass( {
             // );
 
             let backgroundOtherOptionsBox = new St.BoxLayout( {
-                vertical    : true, reactive    : true, track_hover : true,
-                x_expand    : true, y_expand    : true, x_align     : Clutter.ActorAlign.START, y_align     : Clutter.ActorAlign.CENTER
+                orientation : Clutter.Orientation.VERTICAL,
+                reactive    : true,
+                track_hover : true,
+                x_expand    : true,
+                y_expand    : true,
+                x_align     : Clutter.ActorAlign.START,
+                y_align     : Clutter.ActorAlign.CENTER
             } )
 
             let btnDarkModeIconName = Me.session.isDarkMode ? "night-light-symbolic" : "weather-clear-symbolic"
@@ -498,7 +648,7 @@ export var WorksetsIndicator = GObject.registerClass( {
 
             menuItem.bgMenuButton.clickSignalId = menuItem.bgMenuButton.connect( "activate", () => {
                 Me.session.setWorksetBackgroundImage( menuItem.workset, btnDarkMode.viewingDarkMode )
-                this.menu.itemActivated( boxpointer.PopupAnimation.FULL )
+                this.menu.itemActivated( compat.menuAnimation() )
             } )
 
             let updateBackgroundStyle = ( style, menuItem ) => {
@@ -539,40 +689,29 @@ export var WorksetsIndicator = GObject.registerClass( {
 
             // -- Workset info
             let infoText = "Has these favourites"
-            Me.session.workspaceMaps.forEachEntry( ( workspaceMapKey, workspaceMapValues, i ) => {
+            utils.forEachEntry( Me.session.workspaceMaps, ( workspaceMapKey, workspaceMapValues, i ) => {
                 if ( workspaceMapValues.defaultWorkset == menuItem.workset.WorksetName )
-                    infoText += " on the " + utils.stringifyNumber( parseInt( workspaceMapKey.replace( "Workspace", "" ), 10 ) + 1 ) + " workspace"
+                    infoText += " on the " + utils.stringifyNumber( parseInt( workspaceMapKey.replace( "Workspace", "" ) ) + 1 ) + " workspace"
             }, this )
             menuItem.infoMenuButton = new popupMenu.PopupImageMenuItem( _( infoText ), "" )
             menuItem.infoMenuButton.label.set_x_expand( true )
             menuItem.infoMenuButton.setOrnament( popupMenu.Ornament.DOT )
             let addApps = () => {
                 this.menu.toggle()
-                utils.spawnWithCallback(
-                    null,
-                    [fileUtils.APP_CHOOSER_EXEC(), "-w", menuItem.workset.WorksetName],
-                    GLib.get_environ(),
-                    0,
-                    null,
-                    ( resource ) => {
-                        try {
-                            if ( !resource ) return
-                            let newFav = JSON.parse( resource )
-                            Me.session.Worksets
-                                .filter( w => w.WorksetName == menuItem.workset.WorksetName )[0]
-                                .FavApps.push( newFav )
-                            Me.session.saveSession()
-                            Me.session.setFavorites()
-                        } catch ( e ) { dev.log( e ) }
-                    }
-                )
+                this._chooseApplication( menuItem.workset.WorksetName, ( newFav ) => {
+                    Me.session.Worksets
+                        .filter( w => w.WorksetName == menuItem.workset.WorksetName )[0]
+                        .FavApps.push( newFav )
+                    Me.session.saveSession()
+                    Me.session.setFavorites()
+                } )
             }
             uiUtils.createIconButton(
                 menuItem.infoMenuButton,
                 "list-add-symbolic", addApps,
                 {}, { msg: "Add an application to '" + menuItem.workset.WorksetName + "' favourites" }
             )
-            menuItem.infoMenuButton.connect( "button_release_event", addApps )
+            menuItem.infoMenuButton.connect( "button-press-event", addApps )
             uiUtils.createTooltip(
                 menuItem.infoMenuButton,
                 { msg: "Click to select an application to add to '" + menuItem.workset.WorksetName + "' favourites" }
@@ -587,10 +726,16 @@ export var WorksetsIndicator = GObject.registerClass( {
                 menuItem.favAppsMenuItems[i].label.set_x_expand( true )
                 uiUtils.createTooltip( menuItem.favAppsMenuItems[i], { msg: "Click to launch '" + displayName + "'" } )
                 menuItem.favAppsMenuItems[i].connect( "activate", () => {
+                    // S6: Validate exec string before launching
+                    let validatedExec = inputValidator.InputValidator.validateExecString( exec, "FavApp.exec" )
+                    if ( !validatedExec ) {
+                        uiUtils.showUserNotification( "Cannot launch: command contains unsafe characters" )
+                        return
+                    }
                     let [
                         success,
                         argv
-                    ] = GLib.shell_parse_argv( exec.replace( "%u", " " ).replace( "%U", " " ) )
+                    ] = GLib.shell_parse_argv( validatedExec.replace( "%u", " " ).replace( "%U", " " ) )
                     util.spawn( argv )
                     // To do get pid and use AppSystem to focus window - same with the bgmenu editor
                 } )
@@ -609,7 +754,7 @@ export var WorksetsIndicator = GObject.registerClass( {
             // -- Enable all switch if nothing to show here
             if ( Me.session.activeSession.Options.HideAppList && Me.session.activeSession.Options.DisableWallpaperManagement ) {
                 menuItem.revealButton = new popupMenu.PopupSwitchMenuItem( _( "Show Details" ), false, { reactive: true } )
-                menuItem.revealButton.connect( "button_release_event", () => {
+                menuItem.revealButton.connect( "button-press-event", () => {
                     Me.session.activeSession.Options.HideAppList = false
                     Me.session.activeSession.Options.DisableWallpaperManagement = false
                     Me.session.applySession()
@@ -636,7 +781,7 @@ export var WorksetsIndicator = GObject.registerClass( {
                     mode             : Clutter.AnimationMode.EASE_OUT_EXPO,
                 } )
             } else {
-                let angle = ( Me.gExtensions.dash2panelSettings() && Me.gExtensions.dash2panel()?.state === extensionUtils.ExtensionState.ENABLED )
+                let angle = ( Me.gExtensions.dash2panelSettings() && Me.gExtensions.dash2panelActive() )
                     ? -90 : 90
                 menuItem._triangle.ease( {
                     rotation_angle_z : angle,
@@ -644,7 +789,7 @@ export var WorksetsIndicator = GObject.registerClass( {
                     mode             : Clutter.AnimationMode.EASE_OUT_EXPO,
                 } )
                 menuItem.isShowing = true
-                viewArea.open( boxpointer.PopupAnimation.FULL )
+                viewArea.open( compat.menuAnimation() )
                 menuItem.worksetPopupMenu.show()
                 this.optionsMenuItem.hide()
             }
@@ -652,13 +797,15 @@ export var WorksetsIndicator = GObject.registerClass( {
     }
     _refreshMenu() {
         try {
-            Me.session.loadSession()
+            // Me.session.loadSession()
 
             // Ensure option switches match settings
+            this._syncingOptions = true
             this.optionsMenuItems.forEach( function ( menuItem, i ) {
                 if ( typeof this.optionsMenuItems[i]._switch !== "undefined" )
                     this.optionsMenuItems[i]._switch.state = Me.session.activeSession.Options[this.optionsMenuItems[i].optionName]
             }, this )
+            this._syncingOptions = false
 
             //Remove all and re-add with any changes
             if ( !utils.isEmpty( Me.session.activeSession ) ) {
@@ -666,7 +813,6 @@ export var WorksetsIndicator = GObject.registerClass( {
                 Me.session.Worksets.forEach( ( workset, index ) => {
                     this._addWorksetMenuItemEntry( workset, index )
                 }, this )
-                Me.session.saveSession()
             }
         } catch ( e ) { dev.log( e ) }
     }
@@ -689,6 +835,8 @@ export var WorksetsIndicator = GObject.registerClass( {
         } catch ( e ) { dev.log( e ) }
     }
     toggleMenu() {
+        this.reopeningMenu = true
         this.menu.toggle()
+        this.reopeningMenu = false
     }
 } )

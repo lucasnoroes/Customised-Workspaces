@@ -1,7 +1,7 @@
 /*
  * Customised Workspaces extension for Gnome 3
  * This file is part of the Customised Workspaces Gnome Extension for Gnome 3
- * Copyright (C) 2023 A.D. http://github.com/blipk
+ * Copyright (C) http://github.com/blipk
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,19 +37,20 @@
  */
 
 // External imports
-import Gio from "gi://Gio"
+// import Gio from "gi://Gio"
 import Meta from "gi://Meta"
 
 import { Extension, gettext as _ } from "resource:///org/gnome/shell/extensions/extension.js"
 import * as Main from "resource:///org/gnome/shell/ui/main.js"
-import * as config from "resource:///org/gnome/shell/misc/config.js"
-
-const [major] = config.PACKAGE_VERSION.split( "." )
-const shellVersion = Number.parseInt( major )
 
 // Internal imports
 import * as dev from "./dev.js"
+import * as compat from "./compat.js"
 import * as sessionManager from "./sessionManager.js"
+import * as uiUtils from "./lib/ui/uiUtils.js"
+
+const DASH_TO_PANEL_UUID = "dash-to-panel@jderose9.github.com"
+const DASH_TO_DOCK_UUID = "dash-to-dock@micxgx.gmail.com"
 
 export let WorksetsInstance = null
 
@@ -69,20 +70,37 @@ export default class Worksets extends Extension {
 
             // To tune behaviour based on other extensions
             this.gExtensions = new Object()
-            this.gExtensions.dash2panel = () => Extension.lookupByUUID( "dash-to-panel@jderose9.github.com" )
+            this.gExtensions.dash2panel = () => Extension.lookupByUUID( DASH_TO_PANEL_UUID )
+            this.gExtensions.dash2panelActive = () => compat.isExtensionActive( DASH_TO_PANEL_UUID )
 
-            this.gExtensions.dash2panelSettings = () => {
+            this.gExtensions._dash2panelSettingsCache = null
+            this.gExtensions.dash2panelSettings = ( useCache = true ) => {
+                if ( useCache && this.gExtensions._dash2panelSettingsCache )
+                    return this.gExtensions._dash2panelSettingsCache
+
                 try {
-                    return new Gio.Settings( {schema_id: "org.gnome.shell.extensions.dash-to-panel"} )
+                    let ext = this.gExtensions.dash2panel()
+                    if ( !ext ) return null
+                    this.gExtensions._dash2panelSettingsCache = ext.getSettings( "org.gnome.shell.extensions.dash-to-panel" )
+                    return this.gExtensions._dash2panelSettingsCache
                 } catch ( e ) {
+                    dev.log( e )
                     return null
                 }
             }
 
-            this.gExtensions.dash2dock = () => Extension.lookupByUUID( "dash-to-dock@micxgx.gmail.com" )
-            this.gExtensions.dash2dockSettings = () => {
+            this.gExtensions.dash2dock = () => Extension.lookupByUUID( DASH_TO_DOCK_UUID )
+            this.gExtensions.dash2dockActive = () => compat.isExtensionActive( DASH_TO_DOCK_UUID )
+            this.gExtensions._dash2dockSettingsCache = null
+            this.gExtensions.dash2dockSettings = ( useCache = true ) => {
+                if ( useCache && this.gExtensions._dash2dockSettingsCache )
+                    return this.gExtensions._dash2dockSettingsCache
+
                 try {
-                    return new Gio.Settings( {schema_id: "org.gnome.shell.extensions.dash-to-dock"} )
+                    let ext = this.gExtensions.dash2dock()
+                    if ( !ext ) return null
+                    this.gExtensions._dash2dockSettingsCache = ext.getSettings( "org.gnome.shell.extensions.dash-to-dock" )
+                    return this.gExtensions._dash2dockSettingsCache
                 } catch ( e ) {
                     return null
                 }
@@ -106,6 +124,7 @@ export default class Worksets extends Extension {
             dev.log( "!~~~~~~~~~~|" )
 
             this.session.saveSession()
+            uiUtils.clearKnownImages()
             if ( this.worksetsIndicator ) this.worksetsIndicator.destroy()
             delete this.worksetsIndicator
             delete Main.panel.statusArea["WorksetsIndicator"]
@@ -118,7 +137,14 @@ export default class Worksets extends Extension {
             if ( this.session ) this.session.destroy()
             delete this.session
 
-            delete this.settings
+            this.settings = null
+
+            // Release the settings objects of other extensions. enable() makes gExtensions again.
+            if ( this.gExtensions ) {
+                this.gExtensions._dash2panelSettingsCache = null
+                this.gExtensions._dash2dockSettingsCache = null
+            }
+            this.gExtensions = null
 
             dev.log( "!^^^^^^^^^^|\r\n" )
         } catch ( e ) {
