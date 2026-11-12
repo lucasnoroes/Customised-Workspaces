@@ -46,9 +46,20 @@ const MENU_PARAMS_SHELL_VERSION = 51
 const BOX_ORIENTATION_SHELL_VERSION = 48
 /** First GNOME Shell version where St.ImageContent.set_data() takes a Cogl.Context as its first argument. */
 const IMAGE_CONTEXT_SHELL_VERSION = 48
+/** First GNOME Shell version where the extension's popup menu items react to the button press. */
+const MENU_ITEM_PRESS_SHELL_VERSION = 49
 
 /** Major version of the GNOME Shell that runs the extension, for example 51 for "51.1". */
 export const SHELL_MAJOR_VERSION = Number.parseInt( Config.PACKAGE_VERSION.split( "." )[0], 10 )
+
+/**
+ * Signal for a click on one of the extension's popup menu items.
+ * GNOME Shell 48 and earlier do not give the button press to a menu item inside an open popup menu,
+ * only the button release.
+ */
+export const menuItemClickSignal = SHELL_MAJOR_VERSION >= MENU_ITEM_PRESS_SHELL_VERSION
+    ? "button-press-event"
+    : "button-release-event"
 
 /** True when wallpapers must be decoded into a texture for Meta.Background.set_texture(). */
 export const needsBackgroundTextures = SHELL_MAJOR_VERSION >= BACKGROUND_TEXTURES_SHELL_VERSION

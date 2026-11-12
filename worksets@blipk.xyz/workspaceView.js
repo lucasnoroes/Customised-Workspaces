@@ -538,7 +538,7 @@ export class WorkspaceViewManager {
                             menuItem._workset = workset
                             menuItem.label.set_text( menuItem._workset.WorksetName )
 
-                            menuItem.buttonPressId = menuItem.connect( "button-press-event", () => {
+                            menuItem.buttonPressId = menuItem.connect( compat.menuItemClickSignal, () => {
                                 Me.workspaceManager.loadDefaults = false
                                 Me.workspaceManager.noUpdate = true
                                 Me.workspaceManager.switchToWorkspace( i )

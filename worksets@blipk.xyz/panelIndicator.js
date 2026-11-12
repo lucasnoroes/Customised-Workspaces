@@ -156,7 +156,7 @@ export var WorksetsIndicator = GObject.registerClass( {
                     break
                 default: apply = toggleOpt
                 }
-                const eventName = isBoolOption ? "toggled" : "button-press-event"
+                const eventName = isBoolOption ? "toggled" : compat.menuItemClickSignal
                 optionMenuItem.pressHandler = optionMenuItem.connect(
                     eventName,
                     () => {
@@ -274,7 +274,7 @@ export var WorksetsIndicator = GObject.registerClass( {
             this.optionsMenuItem.icon.icon_name = "org.gnome.tweaks"
             this.optionsMenuItems = []
             this._buildOptionsMenuItems()
-            this.optionsMenuItem.connect( "button-press-event", () => {
+            this.optionsMenuItem.connect( compat.menuItemClickSignal, () => {
                 this.optionsMenuItems.forEach( m => m.destroy() )
                 this.optionsMenuItems = []
                 this._buildOptionsMenuItems()
@@ -367,7 +367,7 @@ export var WorksetsIndicator = GObject.registerClass( {
     _addWorksetMenuItemEntry( workSetsArrayBuffer, worksetIndex ) {
         try {
             let menuItem = new popupMenu.PopupSubMenuMenuItem( "", true )
-            menuItem.buttonPressId = menuItem.connect( "button-press-event", () => {
+            menuItem.buttonPressId = menuItem.connect( compat.menuItemClickSignal, () => {
                 this._worksetSubMenuRefresh( menuItem )
                 return Clutter.EVENT_STOP
             } )
@@ -512,7 +512,7 @@ export var WorksetsIndicator = GObject.registerClass( {
 
                 } catch ( e ) { dev.log( e ) }
             }
-            menuItem.worksetPopupMenu.connect( "button-press-event", () => {
+            menuItem.worksetPopupMenu.connect( compat.menuItemClickSignal, () => {
                 menuItem.worksetPopupMenu.menu.bye()
                 return Clutter.SOURCE_REMOVE
                 //return Clutter.EVENT_STOP;
@@ -711,7 +711,7 @@ export var WorksetsIndicator = GObject.registerClass( {
                 "list-add-symbolic", addApps,
                 {}, { msg: "Add an application to '" + menuItem.workset.WorksetName + "' favourites" }
             )
-            menuItem.infoMenuButton.connect( "button-press-event", addApps )
+            menuItem.infoMenuButton.connect( compat.menuItemClickSignal, addApps )
             uiUtils.createTooltip(
                 menuItem.infoMenuButton,
                 { msg: "Click to select an application to add to '" + menuItem.workset.WorksetName + "' favourites" }
@@ -754,7 +754,7 @@ export var WorksetsIndicator = GObject.registerClass( {
             // -- Enable all switch if nothing to show here
             if ( Me.session.activeSession.Options.HideAppList && Me.session.activeSession.Options.DisableWallpaperManagement ) {
                 menuItem.revealButton = new popupMenu.PopupSwitchMenuItem( _( "Show Details" ), false, { reactive: true } )
-                menuItem.revealButton.connect( "button-press-event", () => {
+                menuItem.revealButton.connect( compat.menuItemClickSignal, () => {
                     Me.session.activeSession.Options.HideAppList = false
                     Me.session.activeSession.Options.DisableWallpaperManagement = false
                     Me.session.applySession()
